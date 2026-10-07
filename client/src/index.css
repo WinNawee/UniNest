@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+@theme {
+  --color-nest: #2f9068;
+  --color-nest-dark: #236f50;
+  --color-nest-soft: #e6f0e9;
+  --color-sun: #f5c94c;
+  --color-cream: #f7f6f2;
+  --color-ink: #25282b;
+}
+
+body {
+  background: var(--color-cream);
+  color: var(--color-ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
