@@ -70,6 +70,7 @@ export default function App() {
 
   const { user, profile, isAdmin } = session
   const isStudent = user.role === 'student'
+  const isLandlord = user.role === 'landlord'
 
   return (
     <ChatProvider key={user.id}>
@@ -100,7 +101,7 @@ export default function App() {
           <nav className="max-w-5xl mx-auto px-4 pb-2 flex gap-1 overflow-x-auto">
             {isStudent && <NavLink to="/matches" className={linkClass}><Users size={16} /> Roommates</NavLink>}
             {isStudent && <NavLink to="/listings" className={linkClass}><Home size={16} /> Housing</NavLink>}
-            {!isStudent && <NavLink to="/landlord" className={linkClass}><Building2 size={16} /> My listings</NavLink>}
+            {isLandlord && <NavLink to="/landlord" className={linkClass}><Building2 size={16} /> My listings</NavLink>}
             <MessagesLink />
             {isStudent && <NavLink to="/questionnaire" className={linkClass}><UserRound size={16} /> My profile</NavLink>}
             {isAdmin && <NavLink to="/admin" className={linkClass}><ShieldCheck size={16} /> Verify listings</NavLink>}
@@ -118,11 +119,16 @@ export default function App() {
                 <Route path="/listings" element={<ListingsPage />} />
                 <Route path="*" element={<Navigate to={profile ? '/matches' : '/questionnaire'} />} />
               </>
-            ) : (
+            ) : isLandlord ? (
               <>
                 <Route path="/landlord" element={<LandlordPage />} />
                 {isAdmin && <Route path="/admin" element={<AdminPage />} />}
                 <Route path="*" element={<Navigate to="/landlord" />} />
+              </>
+            ) : (
+              <>
+                {isAdmin && <Route path="/admin" element={<AdminPage />} />}
+                <Route path="*" element={<Navigate to={isAdmin ? '/admin' : '/messages'} />} />
               </>
             )}
           </Routes>

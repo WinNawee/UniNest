@@ -66,6 +66,15 @@ function seed() {
     profiles.set(u.id, { userId: u.id, ...profile });
   }
 
+  // Platform admin who checks new listings. Has its own role, not a landlord.
+  createUser({
+    name: 'UniNest Admin',
+    email: 'admin@uninest.example',
+    role: 'admin',
+    password: DEMO_PASSWORD,
+    verified: true,
+  });
+
   const landlord = createUser({
     name: 'Baan Suan Dorm',
     email: 'owner@baansuan.example',

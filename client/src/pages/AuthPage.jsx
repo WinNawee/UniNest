@@ -90,7 +90,7 @@ export default function AuthPage({ onDone }) {
             <Button disabled={busy} className="w-full">{mode === 'login' ? 'Log in' : 'Create account'}</Button>
           </form>
           <p className="text-xs text-ink/60 mt-4">
-            Demo student: mali@ait.ac.th, demo landlord: owner@baansuan.example. Password for both: demo1234
+            Demo student: mali@ait.ac.th, landlord: owner@baansuan.example, admin: admin@uninest.example. Password for all: demo1234
           </p>
         </Card>
       </div>

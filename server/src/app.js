@@ -56,7 +56,7 @@ function auth(req, res, next) {
 const requireRole = (role) => (req, res, next) =>
   req.user.role === role ? next() : res.status(403).json({ error: `Requires ${role}` });
 
-const isAdmin = (user) => ADMIN_EMAILS.includes(user.email);
+const isAdmin = (user) => user.role === 'admin' || ADMIN_EMAILS.includes(user.email);
 
 // onMessage is called whenever a message is saved through REST, so the socket
 // layer can push it live to both people.

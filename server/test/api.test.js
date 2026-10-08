@@ -83,7 +83,10 @@ test('landlord listing stays hidden until an admin verifies it', async () => {
   const notAdmin = await call(`/api/admin/listings/${id}/verify`, { method: 'PUT', token: stu.data.token });
   assert.equal(notAdmin.status, 403);
 
-  const admin = await call('/api/auth/register', { method: 'POST', body: { name: 'Admin', email: 'admin@uninest.example', password: 'password1', role: 'landlord' } });
+  const admin = await call('/api/auth/login', { method: 'POST', body: { email: 'admin@uninest.example', password: 'demo1234' } });
+  assert.equal(admin.data.user.role, 'admin');
+  const me = await call('/api/me', { token: admin.data.token });
+  assert.equal(me.data.isAdmin, true);
   const ok = await call(`/api/admin/listings/${id}/verify`, { method: 'PUT', token: admin.data.token });
   assert.equal(ok.status, 200);
 
