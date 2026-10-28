@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { api, setToken } from '../api'
 import { HeartHandshake, MessageCircle, ShieldCheck } from 'lucide-react'
 import { Button, Card, ErrorText, Field, Logo, inputClass } from '../components/ui'
+import CheckEmail from '../components/CheckEmail'
 
 export default function AuthPage({ onDone }) {
   const [mode, setMode] = useState('login')
@@ -9,6 +10,8 @@ export default function AuthPage({ onDone }) {
   const [form, setForm] = useState({ name: '', email: '', password: '' })
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  // Set after sign-up (or a login before confirming): shows the "check your email" screen.
+  const [pending, setPending] = useState(null)
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
 
   async function submit(e) {
@@ -16,16 +19,26 @@ export default function AuthPage({ onDone }) {
     setError('')
     setBusy(true)
     try {
-      const path = mode === 'login' ? '/auth/login' : '/auth/register'
-      const body = mode === 'login' ? { email: form.email, password: form.password } : { ...form, role }
-      const { token } = await api(path, { method: 'POST', body })
-      setToken(token)
-      await onDone()
+      if (mode === 'register') {
+        const data = await api('/auth/register', { method: 'POST', body: { ...form, role } })
+        setPending(data)
+      } else {
+        const { token } = await api('/auth/login', { method: 'POST', body: { email: form.email, password: form.password } })
+        setToken(token)
+        await onDone()
+      }
     } catch (err) {
-      setError(err.message)
+      if (err.data?.needsVerification) setPending({ email: err.data.email, fromLogin: true })
+      else setError(err.message)
     } finally {
       setBusy(false)
     }
+  }
+
+  function backToLogin() {
+    setPending(null)
+    setMode('login')
+    setForm({ ...form, password: '' })
   }
 
   return (
@@ -50,6 +63,10 @@ export default function AuthPage({ onDone }) {
           <Logo className="text-3xl" />
           <p className="mt-1">Find the right roommate. Find the right home.</p>
         </div>
+        {pending ? (
+          <CheckEmail {...pending} onBack={backToLogin} />
+        ) : (
+        <>
         <h2 className="hidden lg:block text-2xl font-bold mb-4">Welcome</h2>
         <Card>
           <div className="flex gap-2 mb-5">
@@ -93,6 +110,8 @@ export default function AuthPage({ onDone }) {
             Demo student: mali@ait.ac.th, landlord: owner@baansuan.example, admin: admin@uninest.example. Password for all: demo1234
           </p>
         </Card>
+        </>
+        )}
       </div>
       </div>
     </div>

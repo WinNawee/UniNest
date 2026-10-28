@@ -17,21 +17,31 @@ export const getToken = store.get
 export const setToken = store.set
 
 export async function api(path, { method = 'GET', body } = {}) {
-  const res = await fetch('/api' + path, {
-    method,
-    headers: {
-      'content-type': 'application/json',
-      ...(getToken() ? { authorization: `Bearer ${getToken()}` } : {}),
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  })
-  const data = await res.json().catch(() => ({}))
+  let res
+  try {
+    res = await fetch('/api' + path, {
+      method,
+      headers: {
+        'content-type': 'application/json',
+        ...(getToken() ? { authorization: `Bearer ${getToken()}` } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    })
+  } catch {
+    throw new Error(SERVER_DOWN)
+  }
+  const data = await res.json().catch(() => null)
   if (!res.ok) {
-    const err = new Error(data.error || (data.errors && data.errors.join(', ')) || 'Request failed')
+    // No JSON answer usually means the API server is not running.
+    const message = data?.error || data?.errors?.join(', ') || (data ? 'Request failed' : SERVER_DOWN)
+    const err = new Error(message)
     err.status = res.status
+    err.data = data || {}
     throw err
   }
-  return data
+  return data || {}
 }
+
+const SERVER_DOWN = 'Cannot reach the UniNest server. Make sure it is running (npm start in the server folder).'
 
 export const connectChat = () => io({ auth: { token: getToken() }, reconnectionDelayMax: 5000 })

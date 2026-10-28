@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { Routes, Route, Navigate, NavLink, useNavigate } from 'react-router-dom'
-import { Home, LogOut, MessageCircle, ShieldCheck, Building2, UserRound, Users } from 'lucide-react'
+import { Crown, Home, LogOut, MessageCircle, ShieldCheck, Building2, UserRound, Users } from 'lucide-react'
 import { api, getToken, setToken } from './api'
 import { ChatProvider, useChat } from './chat'
 import { Avatar, Logo } from './components/ui'
@@ -12,6 +12,8 @@ import MessagesPage from './pages/MessagesPage'
 import ListingsPage from './pages/ListingsPage'
 import LandlordPage from './pages/LandlordPage'
 import AdminPage from './pages/AdminPage'
+import VerifyEmailPage from './pages/VerifyEmailPage'
+import PremiumPage from './pages/PremiumPage'
 
 const linkClass = ({ isActive }) =>
   `flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition ${
@@ -63,6 +65,7 @@ export default function App() {
   if (!session) {
     return (
       <Routes>
+        <Route path="/verify-email" element={<VerifyEmailPage onDone={refresh} />} />
         <Route path="*" element={<AuthPage onDone={refresh} />} />
       </Routes>
     )
@@ -82,7 +85,10 @@ export default function App() {
               <div className="hidden sm:flex items-center gap-2.5 pl-1 pr-3 py-1 rounded-full bg-cream">
                 <Avatar name={user.name} size="sm" />
                 <div className="leading-tight">
-                  <p className="text-sm font-semibold">{user.name}</p>
+                  <p className="text-sm font-semibold flex items-center gap-1">
+                    {user.name}
+                    {user.premium && <Crown size={13} className="text-amber-500" aria-label="Premium" />}
+                  </p>
                   <p className="text-[11px] text-ink/60 capitalize flex items-center gap-1">
                     {user.verified && <ShieldCheck size={11} className="text-nest" />}
                     {isAdmin ? 'Admin' : user.role}
@@ -104,7 +110,8 @@ export default function App() {
             {isLandlord && <NavLink to="/landlord" className={linkClass}><Building2 size={16} /> My listings</NavLink>}
             <MessagesLink />
             {isStudent && <NavLink to="/questionnaire" className={linkClass}><UserRound size={16} /> My profile</NavLink>}
-            {isAdmin && <NavLink to="/admin" className={linkClass}><ShieldCheck size={16} /> Verify listings</NavLink>}
+            {isStudent && <NavLink to="/premium" className={linkClass}><Crown size={16} /> Premium</NavLink>}
+            {isAdmin && <NavLink to="/admin" className={linkClass}><ShieldCheck size={16} /> Admin</NavLink>}
           </nav>
         </header>
 
@@ -117,6 +124,7 @@ export default function App() {
                 <Route path="/questionnaire" element={<QuestionnairePage profile={profile} onSaved={refresh} />} />
                 <Route path="/matches" element={profile ? <MatchesPage /> : <Navigate to="/questionnaire" />} />
                 <Route path="/listings" element={<ListingsPage />} />
+                <Route path="/premium" element={<PremiumPage onChanged={refresh} />} />
                 <Route path="*" element={<Navigate to={profile ? '/matches' : '/questionnaire'} />} />
               </>
             ) : isLandlord ? (

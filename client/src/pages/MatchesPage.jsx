@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronDown, MapPin, MessageCircle, Sparkles } from 'lucide-react'
+import { ChevronDown, Crown, MapPin, MessageCircle, Sparkles } from 'lucide-react'
 import { api } from '../api'
 import { Avatar, Button, Card, ErrorText, PageTitle, ScoreBar } from '../components/ui'
 
@@ -16,11 +16,12 @@ const tier = (s) =>
 
 export default function MatchesPage() {
   const [matches, setMatches] = useState(null)
+  const [extra, setExtra] = useState({ total: 0, limited: false })
   const [open, setOpen] = useState(null)
   const [error, setError] = useState('')
 
   useEffect(() => {
-    api('/matches').then((d) => setMatches(d.matches)).catch((e) => setError(e.message))
+    api('/matches').then((d) => { setMatches(d.matches); setExtra({ total: d.total, limited: d.limited }) }).catch((e) => setError(e.message))
   }, [])
 
   if (error) return <ErrorText>{error}</ErrorText>
@@ -41,6 +42,7 @@ export default function MatchesPage() {
                   <div className="flex items-center gap-2 flex-wrap">
                     <h3 className="font-bold text-lg">{m.name}</h3>
                     <span className={`text-xs font-semibold rounded-full px-2 py-0.5 ${t.cls}`}>{t.label}</span>
+                    {m.premium && <span className="text-xs font-semibold rounded-full px-2 py-0.5 bg-amber-100 text-amber-900 flex items-center gap-1"><Crown size={12} /> Premium</span>}
                     {i === 0 && <span className="text-xs font-semibold rounded-full px-2 py-0.5 bg-sun flex items-center gap-1"><Sparkles size={12} /> Top match</span>}
                   </div>
                   <p className="text-sm text-ink/60 mb-2 flex items-center gap-1"><MapPin size={13} /> {m.campus}</p>
@@ -77,6 +79,15 @@ export default function MatchesPage() {
           )
         })}
       </div>
+      {extra.limited && (
+        <Card className="mt-4 flex flex-col sm:flex-row items-center gap-4 bg-sun/15 border-sun">
+          <Crown className="text-amber-600 shrink-0" size={28} />
+          <p className="flex-1 text-center sm:text-left">
+            You are seeing your top {matches.length} of <b>{extra.total} matches</b>. Get Premium to see everyone who fits you.
+          </p>
+          <Link to="/premium" className="px-4 py-2 rounded-xl bg-nest text-white font-semibold whitespace-nowrap">See Premium</Link>
+        </Card>
+      )}
     </div>
   )
 }
