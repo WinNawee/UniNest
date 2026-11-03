@@ -3,6 +3,9 @@
 Roommate and accommodation matching platform for university students.
 Course project for AST02.21 E-Business Development and Technology (AIT, August 2026).
 
+**Live site:** https://uninest-d4xw.onrender.com
+(free server: the first visit after a quiet period can take up to a minute)
+
 ## What works now
 
 - Student sign-up with a university email check (.edu, .ac.xx, ait.asia)
