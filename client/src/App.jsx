@@ -9,6 +9,7 @@ import QuestionnairePage from './pages/QuestionnairePage'
 import MatchesPage from './pages/MatchesPage'
 import ChatPage from './pages/ChatPage'
 import MessagesPage from './pages/MessagesPage'
+import { ForgotPasswordPage, ResetPasswordPage } from './pages/PasswordPages'
 import ListingsPage from './pages/ListingsPage'
 import LandlordPage from './pages/LandlordPage'
 import AdminPage from './pages/AdminPage'
@@ -66,6 +67,8 @@ export default function App() {
     return (
       <Routes>
         <Route path="/verify-email" element={<VerifyEmailPage onDone={refresh} />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage onDone={refresh} />} />
         <Route path="*" element={<AuthPage onDone={refresh} />} />
       </Routes>
     )
@@ -123,7 +126,7 @@ export default function App() {
               <>
                 <Route path="/questionnaire" element={<QuestionnairePage profile={profile} onSaved={refresh} />} />
                 <Route path="/matches" element={profile ? <MatchesPage /> : <Navigate to="/questionnaire" />} />
-                <Route path="/listings" element={<ListingsPage />} />
+                <Route path="/listings" element={<ListingsPage me={user} />} />
                 <Route path="/premium" element={<PremiumPage onChanged={refresh} />} />
                 <Route path="*" element={<Navigate to={profile ? '/matches' : '/questionnaire'} />} />
               </>

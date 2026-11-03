@@ -15,7 +15,8 @@ const SLIDERS = [
 
 const DEFAULTS = {
   cleanliness: 3, sleep: 3, noise: 3, social: 3, study: 3, guests: 3, culturalOpenness: 3,
-  budgetMin: 4000, budgetMax: 7000, smoking: 'no', food: 'any', gender: 'female',
+  // Gender, smoking and food start empty, so nobody is matched on an answer they never gave.
+  budgetMin: 4000, budgetMax: 7000, smoking: '', food: '', gender: '',
   genderPref: 'any', languages: 'English', campus: 'AIT',
 }
 
@@ -76,15 +77,17 @@ export default function QuestionnairePage({ profile, onSaved }) {
           <Field label="Monthly budget up to (THB)">
             <input type="number" min="0" className={inputClass} value={form.budgetMax} onChange={set('budgetMax')} />
           </Field>
-          <Field label="Smoking">
-            <select className={inputClass} value={form.smoking} onChange={set('smoking')}>
-              <option value="no">Not at all</option>
-              <option value="outside">Only outside</option>
-              <option value="yes">Fine indoors</option>
+          <Field label="Do you smoke?">
+            <select className={inputClass} value={form.smoking} onChange={set('smoking')} required>
+              <option value="" disabled>Choose...</option>
+              <option value="no">No</option>
+              <option value="outside">Yes, only outside</option>
+              <option value="yes">Yes, also indoors</option>
             </select>
           </Field>
           <Field label="Food">
-            <select className={inputClass} value={form.food} onChange={set('food')}>
+            <select className={inputClass} value={form.food} onChange={set('food')} required>
+              <option value="" disabled>Choose...</option>
               <option value="any">Eat anything</option>
               <option value="any_with_pork">Eat anything, including pork</option>
               <option value="halal">Halal</option>
@@ -98,7 +101,8 @@ export default function QuestionnairePage({ profile, onSaved }) {
             <input className={inputClass} value={form.campus} onChange={set('campus')} placeholder="AIT" />
           </Field>
           <Field label="Gender">
-            <select className={inputClass} value={form.gender} onChange={set('gender')}>
+            <select className={inputClass} value={form.gender} onChange={set('gender')} required>
+              <option value="" disabled>Choose...</option>
               <option value="female">Female</option>
               <option value="male">Male</option>
               <option value="other">Other</option>

@@ -14,7 +14,11 @@ export function fakeMailer({ delivered = true } = {}) {
   return {
     sent,
     async sendVerification(mail) {
-      sent.push(mail);
+      sent.push({ ...mail, kind: 'verify' });
+      return { delivered };
+    },
+    async sendPasswordReset(mail) {
+      sent.push({ ...mail, kind: 'reset' });
       return { delivered };
     },
     lastToken() {

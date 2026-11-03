@@ -1,4 +1,4 @@
-// Shrinks a photo before upload so slips stay small (about 100 to 400 KB).
+// Shrinks a photo before upload so slips and room photos stay small (about 100 to 400 KB).
 // Returns a JPEG data URL.
 export function compressImage(file, maxSide = 1200, quality = 0.8) {
   return new Promise((resolve, reject) => {
@@ -22,7 +22,7 @@ export function compressImage(file, maxSide = 1200, quality = 0.8) {
     }
     img.onerror = () => {
       URL.revokeObjectURL(url)
-      reject(new Error('This photo could not be opened. Please use a JPG or PNG screenshot of your slip.'))
+      reject(new Error('This photo could not be opened. Please use a JPG or PNG image.'))
     }
     img.src = url
   })

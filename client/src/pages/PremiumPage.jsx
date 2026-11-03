@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { CheckCircle2, Clock, Crown, ImageUp, TriangleAlert, XCircle } from 'lucide-react'
+import { CheckCircle2, Clock, Crown, Handshake } from 'lucide-react'
 import { api } from '../api'
-import { compressImage } from '../image'
-import { Button, Card, ErrorText, PageTitle } from '../components/ui'
+import { Card, ErrorText, PageTitle } from '../components/ui'
+import PaySlipForm from '../components/PaySlipForm'
+import InviteCard from '../components/InviteCard'
 
 const dateText = (iso) => new Date(iso).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })
 
@@ -20,6 +21,9 @@ export default function PremiumPage({ onChanged }) {
   const latest = data.payments[0]
   const benefits = [
     `See all your roommate matches (free accounts see the top ${data.freeMatchLimit})`,
+    'Advanced match filters: budget, sleep time, smoking, food, language and minimum score',
+    'See who viewed your profile, and message them first',
+    'Early access: see newly verified rooms 24 hours before everyone else',
     'Premium badge on your profile, so others know you are serious',
     `Valid for ${data.plan.days} days, about one semester`,
   ]
@@ -40,9 +44,26 @@ export default function PremiumPage({ onChanged }) {
           <PlanCard plan={data.plan} benefits={benefits} />
           {latest?.status === 'pending'
             ? <PendingCard payment={latest} />
-            : <PayCard data={data} latest={latest} onUploaded={() => { load(); onChanged?.() }} />}
+            : (
+              <Card>
+                <PaySlipForm
+                  amount={data.plan.amount}
+                  qr={data.qr}
+                  testMode={data.testMode}
+                  payTo={data.payTo}
+                  postTo="/premium/payments"
+                  lastRejected={latest?.status === 'rejected' ? latest : null}
+                  onUploaded={() => { load(); onChanged?.() }}
+                />
+              </Card>
+            )}
         </div>
       )}
+
+      <div className="grid md:grid-cols-2 gap-5 mt-5 [&>*]:min-w-0">
+        <InviteCard />
+        <PerksCard isPremium={data.isPremium} />
+      </div>
 
       {data.payments.length > 0 && <History payments={data.payments} />}
     </div>
@@ -65,70 +86,22 @@ function PlanCard({ plan, benefits }) {
   )
 }
 
-function PayCard({ data, latest, onUploaded }) {
-  const [slip, setSlip] = useState(null)
-  const [error, setError] = useState('')
-  const [busy, setBusy] = useState(false)
-
-  async function choose(e) {
-    setError('')
-    const file = e.target.files?.[0]
-    if (!file) return
-    try {
-      setSlip(await compressImage(file))
-    } catch (err) {
-      setError(err.message)
-    }
-  }
-
-  async function submit() {
-    setBusy(true)
-    setError('')
-    try {
-      await api('/premium/payments', { method: 'POST', body: { slip } })
-      onUploaded()
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setBusy(false)
-    }
-  }
-
+// Partner offers are planned, not live yet, so they are clearly marked "coming soon".
+function PerksCard({ isPremium }) {
   return (
     <Card>
-      {latest?.status === 'rejected' && (
-        <div className="flex gap-2 bg-red-50 text-red-800 rounded-xl p-3 mb-4 text-sm">
-          <XCircle size={18} className="shrink-0" />
-          <p>Your last slip was not accepted: <b>{latest.rejectReason}</b>. Please upload a new one.</p>
+      <div className="flex items-start gap-3">
+        <div className="w-11 h-11 rounded-full bg-nest-soft text-nest grid place-items-center shrink-0"><Handshake size={22} /></div>
+        <div>
+          <h3 className="font-bold flex items-center gap-2">Partner perks <span className="text-xs font-semibold rounded-full px-2 py-0.5 bg-cream border border-black/10">Coming soon</span></h3>
+          <p className="text-sm text-ink/70 mb-2">We are talking to partners so {isPremium ? 'you' : 'Premium students'} can save on student life:</p>
+          <ul className="text-sm space-y-1 list-disc pl-5">
+            <li>Discounts at restaurants and cafes near campus</li>
+            <li>Cheaper ride-hailing trips during your first 2 months</li>
+          </ul>
+          <p className="text-xs text-ink/60 mt-2">These offers are not available yet. We will announce partners here.</p>
         </div>
-      )}
-
-      <h3 className="font-bold mb-1">1. Scan and pay with PromptPay</h3>
-      <p className="text-sm text-ink/70 mb-3">Open any Thai banking app, scan the QR and check the amount is {data.plan.amount} THB.</p>
-      {data.testMode && (
-        <div className="flex gap-2 bg-sun/25 border border-sun rounded-xl p-2.5 mb-3 text-sm">
-          <TriangleAlert size={18} className="shrink-0" />
-          <p><b>Test QR. Do not pay.</b> No PromptPay number is set on this server yet.</p>
-        </div>
-      )}
-      <div className="flex flex-col items-center bg-white border border-black/10 rounded-2xl p-4 mb-1">
-        <p className="text-xs font-bold tracking-wider text-[#113566] mb-2">THAI QR PAYMENT · PROMPTPAY</p>
-        <img src={data.qr} alt={`PromptPay QR for ${data.plan.amount} THB`} className={`w-52 h-52 ${data.testMode ? 'opacity-40' : ''}`} />
-        <p className="font-bold text-lg mt-2">{data.plan.amount}.00 THB</p>
-        {data.payTo && <p className="text-sm text-ink/70">Pay to {data.payTo}</p>}
       </div>
-
-      <h3 className="font-bold mt-5 mb-1">2. Upload your transfer slip</h3>
-      <p className="text-sm text-ink/70 mb-3">Take a screenshot of the slip in your banking app. We check it, usually within a day.</p>
-      <label className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-nest/30 rounded-2xl p-4 cursor-pointer hover:bg-nest-soft/40 transition">
-        {slip
-          ? <img src={slip} alt="Your slip" className="max-h-56 rounded-lg" />
-          : <><ImageUp className="text-nest" /> <span className="font-semibold">Choose slip photo</span></>}
-        <input type="file" accept="image/*" onChange={choose} className="sr-only" aria-label="Slip photo" />
-      </label>
-      {slip && <p className="text-xs text-ink/60 mt-1 text-center">Tap the image to choose a different one.</p>}
-      <div className="mt-3"><ErrorText>{error}</ErrorText></div>
-      <Button onClick={submit} disabled={!slip || busy} className="w-full mt-1">{busy ? 'Sending...' : 'Send slip for checking'}</Button>
     </Card>
   )
 }

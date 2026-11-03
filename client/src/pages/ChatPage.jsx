@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, Lock, SendHorizontal } from 'lucide-react'
 import { api } from '../api'
 import { useChat } from '../chat'
@@ -11,14 +11,23 @@ const STARTERS = [
   'Which area near campus do you prefer?',
 ]
 
+const LANDLORD_STARTERS = [
+  'Is the room still available?',
+  'Can I come and see the room this week?',
+  'What is included in the rent (water, electricity, wifi)?',
+]
+
 const time = (iso) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
 export default function ChatPage({ me }) {
   const { userId } = useParams()
+  const [params] = useSearchParams()
   const { status, version, send, refreshUnread } = useChat()
   const [partner, setPartner] = useState(null)
   const [messages, setMessages] = useState([])
-  const [text, setText] = useState('')
+  // Coming from "Message landlord": start with a question about that room.
+  const about = params.get('about')
+  const [text, setText] = useState(about ? `Hi, I saw "${about}" on UniNest. Is it still available?` : '')
   const [error, setError] = useState('')
   const [sending, setSending] = useState(false)
   const bottomRef = useRef(null)
@@ -84,7 +93,7 @@ export default function ChatPage({ me }) {
               <p className="font-bold text-lg">Say hi to {partner.name}</p>
               <p className="text-sm text-ink/60 mb-4">Not sure how to start? Tap a suggestion.</p>
               <div className="flex flex-wrap justify-center gap-2">
-                {STARTERS.map((s) => (
+                {(partner.role === 'landlord' ? LANDLORD_STARTERS : STARTERS).map((s) => (
                   <button
                     key={s}
                     type="button"

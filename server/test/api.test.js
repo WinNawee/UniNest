@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { isUniversityEmail } from '../src/app.js';
+import { db } from '../src/db/index.js';
 import { startTestServer, registerAndConfirm, login } from './helpers.js';
 
 let ctx;
@@ -89,20 +90,61 @@ test('landlord listing stays hidden until an admin verifies it', async () => {
   const missing = await ctx.call('/api/admin/listings/not-a-real-id/verify', { method: 'PUT', token: admin.data.token });
   assert.equal(missing.status, 404);
 
-  const after = await ctx.call('/api/listings', { token: stu.data.token });
-  assert.equal(after.data.listings.some((x) => x.id === id), true);
+  // Brand-new rooms are Premium early access for 24 hours: free students do not see it yet.
+  const freeView = await ctx.call('/api/listings', { token: stu.data.token });
+  assert.equal(freeView.data.listings.some((x) => x.id === id), false);
+  assert.ok(freeView.data.earlyAccessHidden >= 1);
+
+  const mali = await db.users.findByEmail('mali@ait.ac.th');
+  await db.users.update(mali.id, { premiumUntil: new Date(Date.now() + 86400000).toISOString() });
+  const premiumView = await ctx.call('/api/listings', { token: stu.data.token });
+  const room = premiumView.data.listings.find((x) => x.id === id);
+  assert.equal(room.isNew, true);
+  assert.equal(premiumView.data.earlyAccessHidden, 0);
+
+  // After 24 hours everyone sees it.
+  await db.listings.update(id, { verifiedAt: new Date(Date.now() - 2 * 86400000).toISOString() });
+  await db.users.update(mali.id, { premiumUntil: null });
+  const later = await ctx.call('/api/listings', { token: stu.data.token });
+  assert.equal(later.data.listings.some((x) => x.id === id && !x.isNew), true);
 });
 
-test('reviews on a listing', async () => {
+test('featured rooms come first in Housing', async () => {
   const stu = await login(ctx, 'mali@ait.ac.th');
-  const [listing] = (await ctx.call('/api/listings', { token: stu.data.token })).data.listings;
-  const bad = await ctx.call(`/api/listings/${listing.id}/reviews`, { method: 'POST', token: stu.data.token, body: { rating: 9 } });
-  assert.equal(bad.status, 400);
-  await ctx.call(`/api/listings/${listing.id}/reviews`, { method: 'POST', token: stu.data.token, body: { rating: 4, text: 'Clean' } });
-  await ctx.call(`/api/listings/${listing.id}/reviews`, { method: 'POST', token: stu.data.token, body: { rating: 2 } });
-  const r = await ctx.call(`/api/listings/${listing.id}/reviews`, { token: stu.data.token });
-  assert.equal(r.data.reviews.length, 2);
-  assert.equal(r.data.average, 3);
+  const r = await ctx.call('/api/listings', { token: stu.data.token });
+  const firstNotFeatured = r.data.listings.findIndex((l) => !l.featured);
+  assert.ok(r.data.listings[0].featured);
+  assert.ok(r.data.listings.slice(firstNotFeatured).every((l) => !l.featured));
+});
+
+test('reviews: students only, one per room, shown with first names and averages', async () => {
+  const mali = await login(ctx, 'mali@ait.ac.th');
+  const aisha = await login(ctx, 'aisha@ait.ac.th');
+  const owner = await login(ctx, 'owner@baansuan.example');
+  const list = (await ctx.call('/api/listings', { token: mali.data.token })).data.listings;
+  const room = list.find((l) => l.title === 'Budget fan room');
+  const post = (token, body) => ctx.call(`/api/listings/${room.id}/reviews`, { method: 'POST', token, body });
+
+  assert.equal((await post(owner.data.token, { rating: 5 })).status, 403);
+  assert.equal((await post(mali.data.token, { rating: 9 })).status, 400);
+  assert.equal((await post(mali.data.token, { rating: 2.5 })).status, 400);
+
+  assert.equal((await post(mali.data.token, { rating: 4, text: 'Clean' })).status, 201);
+  const again = await post(mali.data.token, { rating: 2, text: 'Got noisy' });
+  assert.equal(again.status, 200);
+  assert.equal(again.data.updated, true);
+  assert.equal((await post(aisha.data.token, { rating: 5, text: 'Great value' })).status, 201);
+
+  const r = await ctx.call(`/api/listings/${room.id}/reviews`, { token: mali.data.token });
+  assert.equal(r.data.count, 2);
+  assert.equal(r.data.average, 3.5);
+  const mine = r.data.reviews.find((x) => x.mine);
+  assert.equal(mine.text, 'Got noisy');
+  assert.equal(mine.author, 'Mali');
+
+  const after = (await ctx.call('/api/listings', { token: mali.data.token })).data.listings.find((l) => l.id === room.id);
+  assert.equal(after.rating, 3.5);
+  assert.equal(after.reviewCount, 2);
 });
 
 test('students cannot create listings and requests need a token', async () => {

@@ -1,0 +1,12 @@
+{
+  "name": "uninest",
+  "private": true,
+  "description": "Roommate and accommodation matching for university students. Used by Render to build and start the whole app.",
+  "engines": {
+    "node": ">=20.11"
+  },
+  "scripts": {
+    "build": "npm install --prefix server && npm install --include=dev --prefix client && npm run build --prefix client",
+    "start": "npm start --prefix server"
+  }
+}

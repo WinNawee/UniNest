@@ -44,4 +44,7 @@ export async function api(path, { method = 'GET', body } = {}) {
 
 const SERVER_DOWN = 'Cannot reach the UniNest server. Make sure it is running (npm start in the server folder).'
 
+// Room photos are plain images, so they can be used in <img src>.
+export const photoUrl = (id) => `/api/photos/${id}`
+
 export const connectChat = () => io({ auth: { token: getToken() }, reconnectionDelayMax: 5000 })

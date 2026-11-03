@@ -4,19 +4,25 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { db } from './db/index.js';
+import { APP_URL } from './env.js';
 import { createMailer } from './mailer.js';
 import { rankMatches, scorePair, isEligible, validateProfile } from './matching.js';
-import { addPaymentRoutes, isPremium, FREE_MATCH_LIMIT } from './payments.js';
+import { addPaymentRoutes, isPremium, isFeatured, FREE_MATCH_LIMIT } from './payments.js';
+import { addReferralRoutes, findReferrer, rewardReferral } from './referrals.js';
+import { addViewRoutes } from './views.js';
+import { addStatsRoutes } from './stats.js';
+import { addPhotoRoutes } from './photos.js';
+import { demoAccountsOff, isDemoAccount, DEMO_LANDLORD_EMAIL } from './seed.js';
 
 export const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
 const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || 'admin@uninest.example')
   .split(',')
   .map((s) => s.trim().toLowerCase());
 
-// Where the confirmation link in the email points to (the web app).
-const APP_URL = (process.env.APP_URL || 'http://localhost:5173').replace(/\/$/, '');
+
 const VERIFY_LINK_HOURS = 24;
 const RESEND_WAIT_SECONDS = 60;
+const RESET_LINK_MINUTES = 60;
 
 // Student sign-up needs a university address. Known domains are listed here,
 // and anything ending in .edu or .ac.xx is accepted too.
@@ -35,13 +41,17 @@ export function isUniversityEmail(email) {
   );
 }
 
+// "v" is the session version. Resetting the password raises it, which logs out
+// every device that logged in before.
 export const signToken = (user) =>
-  jwt.sign({ sub: user.id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+  jwt.sign({ sub: user.id, role: user.role, v: user.sessionVersion || 0 }, JWT_SECRET, { expiresIn: '7d' });
 
 // Returns the user for a login token, or null.
 export async function verifyToken(token) {
   const payload = jwt.verify(token, JWT_SECRET);
-  return db.users.findById(payload.sub);
+  const user = await db.users.findById(payload.sub);
+  if (user && (payload.v || 0) !== (user.sessionVersion || 0)) return null; // logged in before a password reset
+  return user;
 }
 
 export const publicUser = (u) => ({
@@ -70,6 +80,8 @@ function newVerifyToken() {
   };
 }
 
+const DEMO_OFF = 'Demo accounts are switched off on the live site. Please create your own account.';
+
 async function auth(req, res, next) {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
@@ -81,6 +93,7 @@ async function auth(req, res, next) {
     return res.status(401).json({ error: 'Invalid token' });
   }
   if (!user) return res.status(401).json({ error: 'Unknown user' });
+  if (demoAccountsOff() && isDemoAccount(user)) return res.status(401).json({ error: DEMO_OFF });
   req.user = user;
   next();
 }
@@ -96,7 +109,7 @@ const isAdmin = (user) => user.role === 'admin' || ADMIN_EMAILS.includes(user.em
 export function buildApp({ onMessage = () => {}, mailer = createMailer() } = {}) {
   const app = express();
   app.use(cors());
-  app.use(express.json({ limit: '3mb' })); // room for a payment slip photo
+  app.use(express.json({ limit: '3mb' })); // room for a payment slip or room photo
 
   // Without real email set up (and outside production), the API also returns
   // the confirmation link so the app can be used on a laptop.
@@ -117,7 +130,7 @@ export function buildApp({ onMessage = () => {}, mailer = createMailer() } = {})
 
   // ---------- Auth ----------
   app.post('/api/auth/register', async (req, res) => {
-    const { name, email, password, role = 'student' } = req.body || {};
+    const { name, email, password, role = 'student', ref } = req.body || {};
     if (!name || !email || !password) return res.status(400).json({ error: 'name, email, password required' });
     if (String(password).length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
     if (!['student', 'landlord'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
@@ -127,6 +140,9 @@ export function buildApp({ onMessage = () => {}, mailer = createMailer() } = {})
     }
     if (await db.users.findByEmail(email)) return res.status(409).json({ error: 'Email already registered' });
 
+    // Invite code from a friend's link (students only).
+    const referrer = role === 'student' && ref ? await findReferrer(ref) : null;
+
     const { token, fields } = newVerifyToken();
     const user = await db.users.create({
       name: String(name).trim(),
@@ -134,6 +150,7 @@ export function buildApp({ onMessage = () => {}, mailer = createMailer() } = {})
       role,
       passwordHash: bcrypt.hashSync(String(password), 8),
       verified: false,
+      ...(referrer ? { referredBy: referrer.id } : {}),
       ...fields,
     });
     const mail = await sendVerifyEmail(user, token);
@@ -154,13 +171,16 @@ export function buildApp({ onMessage = () => {}, mailer = createMailer() } = {})
     if (new Date(user.verifyTokenExpires) < new Date()) {
       return res.status(400).json({ error: 'This link has expired. Please ask for a new one.', expired: true, email: user.email });
     }
-    const updated = await db.users.update(user.id, {
+    await db.users.update(user.id, {
       verified: true,
       verifyTokenHash: null,
       verifyTokenExpires: null,
     });
+    // If a friend invited them, both get free Premium days now.
+    const referral = await rewardReferral(await db.users.findById(user.id));
+    const updated = await db.users.findById(user.id);
     // Confirming also logs the person in.
-    res.json({ token: signToken(updated), user: publicUser(updated) });
+    res.json({ token: signToken(updated), user: publicUser(updated), referralReward: Boolean(referral?.friend) });
   });
 
   app.post('/api/auth/resend-verification', async (req, res) => {
@@ -187,6 +207,7 @@ export function buildApp({ onMessage = () => {}, mailer = createMailer() } = {})
     if (!user || !bcrypt.compareSync(String(password || ''), user.passwordHash)) {
       return res.status(401).json({ error: 'Wrong email or password' });
     }
+    if (demoAccountsOff() && isDemoAccount(user)) return res.status(403).json({ error: DEMO_OFF });
     if (!user.verified) {
       return res.status(403).json({
         error: 'Please confirm your email first. Check your inbox for the link.',
@@ -195,6 +216,57 @@ export function buildApp({ onMessage = () => {}, mailer = createMailer() } = {})
       });
     }
     res.json({ token: signToken(user), user: publicUser(user) });
+  });
+
+  // ---------- Forgot password ----------
+  app.post('/api/auth/forgot-password', async (req, res) => {
+    const email = String(req.body?.email || '');
+    const user = email && (await db.users.findByEmail(email));
+    // Same answer whether or not the account exists.
+    const generic = { message: 'If an account uses that email, we sent a link to reset the password.' };
+    if (!user || (demoAccountsOff() && isDemoAccount(user))) return res.json(generic);
+
+    const waited = (Date.now() - new Date(user.resetTokenSentAt || 0)) / 1000;
+    if (waited < RESEND_WAIT_SECONDS) {
+      return res.status(429).json({ error: `Please wait ${Math.ceil(RESEND_WAIT_SECONDS - waited)} seconds before asking again.` });
+    }
+    const token = randomBytes(32).toString('hex');
+    await db.users.update(user.id, {
+      resetTokenHash: hashToken(token),
+      resetTokenExpires: new Date(Date.now() + RESET_LINK_MINUTES * 60 * 1000).toISOString(),
+      resetTokenSentAt: new Date().toISOString(),
+    });
+    const link = `${APP_URL}/reset-password?token=${token}`;
+    try {
+      const result = await mailer.sendPasswordReset({ to: user.email, name: user.name, link });
+      res.json({ ...generic, devResetUrl: showDevLink(result) ? link : undefined });
+    } catch (err) {
+      console.error('Could not send password reset email:', err.message);
+      res.json(generic);
+    }
+  });
+
+  app.post('/api/auth/reset-password', async (req, res) => {
+    const token = String(req.body?.token || '');
+    const password = String(req.body?.password || '');
+    const [user] = token ? await db.users.find({ resetTokenHash: hashToken(token) }) : [];
+    if (!user) return res.status(400).json({ error: 'This link is invalid or has already been used.' });
+    if (new Date(user.resetTokenExpires) < new Date()) {
+      return res.status(400).json({ error: 'This link has expired. Please ask for a new one.', expired: true });
+    }
+    if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+
+    const updated = await db.users.update(user.id, {
+      passwordHash: bcrypt.hashSync(password, 8),
+      sessionVersion: (user.sessionVersion || 0) + 1,
+      resetTokenHash: null,
+      resetTokenExpires: null,
+      // Opening the emailed link proves they own the address.
+      verified: true,
+      verifyTokenHash: null,
+      verifyTokenExpires: null,
+    });
+    res.json({ token: signToken(updated), user: publicUser(updated) });
   });
 
   app.get('/api/me', auth, async (req, res) => {
@@ -221,20 +293,32 @@ export function buildApp({ onMessage = () => {}, mailer = createMailer() } = {})
     const people = await db.users.findByIds(ranked.map((m) => m.userId));
     const personOf = new Map(people.map((u) => [u.id, u]));
     const campusOf = new Map(all.map((p) => [p.userId, p.campus]));
-    const matches = ranked
-      .filter((m) => personOf.has(m.userId))
+    const profileOf = new Map(all.map((p) => [p.userId, p]));
+    const premium = isPremium(req.user);
+
+    // On the live site, demo students are hidden so real students only meet real people.
+    const hideDemo = demoAccountsOff();
+    let matches = ranked
+      .filter((m) => personOf.has(m.userId) && !(hideDemo && isDemoAccount(personOf.get(m.userId))))
       .map((m) => ({
         ...m,
         name: personOf.get(m.userId).name,
         campus: campusOf.get(m.userId),
         premium: isPremium(personOf.get(m.userId)),
       }));
+
+    // Advanced filters are a Premium feature. Free students' filters are ignored.
+    const filters = readMatchFilters(req.query);
+    const filtering = premium && Object.keys(filters).length > 0;
+    if (filtering) matches = matches.filter((m) => passesFilters(profileOf.get(m.userId), m, filters));
+
     // Free students see the best few matches, Premium students see all.
-    const premium = isPremium(req.user);
     res.json({
       matches: premium ? matches : matches.slice(0, FREE_MATCH_LIMIT),
       total: matches.length,
       limited: !premium && matches.length > FREE_MATCH_LIMIT,
+      filtersLocked: !premium,
+      filtersApplied: filtering ? filters : {},
     });
   });
 
@@ -255,7 +339,38 @@ export function buildApp({ onMessage = () => {}, mailer = createMailer() } = {})
     if (type) rows = rows.filter((l) => l.type === type);
     if (campus) rows = rows.filter((l) => l.campus === campus);
     if (maxDistance) rows = rows.filter((l) => l.distanceKm <= Number(maxDistance));
-    res.json({ listings: rows.sort((a, b) => a.price - b.price) });
+
+    // Rooms verified in the last 24 hours are early access for Premium students.
+    const freeStudent = req.user.role === 'student' && !isPremium(req.user);
+    // On the live site the demo landlord's rooms are shown as samples (nobody answers their messages).
+    const demoLandlord = demoAccountsOff() ? await db.users.findByEmail(DEMO_LANDLORD_EMAIL) : null;
+    const withFlags = rows.map((l) => ({
+      ...l,
+      photoIds: l.photoIds || [],
+      featured: isFeatured(l),
+      isNew: isEarlyAccess(l),
+      sample: Boolean(demoLandlord) && l.ownerId === demoLandlord.id,
+    }));
+    const visible = freeStudent ? withFlags.filter((l) => !l.isNew) : withFlags;
+
+    // Average star rating for each room.
+    const reviews = await db.reviews.find();
+    const ratings = new Map();
+    for (const r of reviews) {
+      const s = ratings.get(r.listingId) || { sum: 0, count: 0 };
+      s.sum += r.rating;
+      s.count += 1;
+      ratings.set(r.listingId, s);
+    }
+    const listings = visible
+      .map((l) => {
+        const s = ratings.get(l.id);
+        return { ...l, rating: s ? Math.round((s.sum / s.count) * 10) / 10 : null, reviewCount: s?.count || 0 };
+      })
+      // Paid Featured Listings first, then cheapest first.
+      .sort((a, b) => (b.featured - a.featured) || (a.price - b.price));
+
+    res.json({ listings, earlyAccessHidden: withFlags.length - visible.length });
   });
 
   app.post('/api/listings', auth, requireRole('landlord'), async (req, res) => {
@@ -279,35 +394,65 @@ export function buildApp({ onMessage = () => {}, mailer = createMailer() } = {})
   });
 
   app.get('/api/listings/mine', auth, requireRole('landlord'), async (req, res) => {
-    res.json({ listings: await db.listings.find({ ownerId: req.user.id }) });
+    const rows = await db.listings.find({ ownerId: req.user.id });
+    const pending = await db.payments.find({ userId: req.user.id, status: 'pending' });
+    const pendingFor = new Set(pending.map((p) => p.listingId).filter(Boolean));
+    res.json({
+      listings: rows.map((l) => ({ ...l, photoIds: l.photoIds || [], featured: isFeatured(l), featurePending: pendingFor.has(l.id) })),
+    });
   });
 
   app.get('/api/admin/listings/pending', auth, async (req, res) => {
     if (!isAdmin(req.user)) return res.status(403).json({ error: 'Admin only' });
-    res.json({ listings: await db.listings.find({ verified: false }) });
+    const rows = await db.listings.find({ verified: false });
+    res.json({ listings: rows.map((l) => ({ ...l, photoIds: l.photoIds || [] })) });
   });
 
   app.put('/api/admin/listings/:id/verify', auth, async (req, res) => {
     if (!isAdmin(req.user)) return res.status(403).json({ error: 'Admin only' });
-    const listing = await db.listings.update(req.params.id, { verified: true });
+    const listing = await db.listings.update(req.params.id, { verified: true, verifiedAt: new Date().toISOString() });
     if (!listing) return res.status(404).json({ error: 'Listing not found' });
     res.json({ listing });
   });
 
-  // ---------- Two-way reviews ----------
-  app.post('/api/listings/:id/reviews', auth, async (req, res) => {
+  // ---------- Reviews ----------
+  // Only confirmed students can review, one review per room (writing again updates it).
+  app.post('/api/listings/:id/reviews', auth, requireRole('student'), async (req, res) => {
     const listing = await db.listings.get(req.params.id);
     if (!listing || !listing.verified) return res.status(404).json({ error: 'Listing not found' });
-    const { rating, text = '' } = req.body || {};
-    if (!(rating >= 1 && rating <= 5)) return res.status(400).json({ error: 'rating must be 1-5' });
-    await db.reviews.create({ listingId: listing.id, authorId: req.user.id, rating: Number(rating), text: String(text).slice(0, 500) });
-    res.status(201).json({ ok: true });
+    const rating = Number(req.body?.rating);
+    const text = String(req.body?.text || '').trim().slice(0, 500);
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) return res.status(400).json({ error: 'Please choose 1 to 5 stars.' });
+
+    const [existing] = await db.reviews.find({ listingId: listing.id, authorId: req.user.id });
+    if (existing) {
+      await db.reviews.update(existing.id, { rating, text, at: new Date().toISOString() });
+      return res.json({ ok: true, updated: true });
+    }
+    await db.reviews.create({ listingId: listing.id, authorId: req.user.id, rating, text });
+    res.status(201).json({ ok: true, updated: false });
   });
 
   app.get('/api/listings/:id/reviews', auth, async (req, res) => {
     const rows = await db.reviews.forListing(req.params.id);
-    const avg = rows.length ? rows.reduce((s, r) => s + r.rating, 0) / rows.length : null;
-    res.json({ average: avg, reviews: rows });
+    const people = await db.users.findByIds([...new Set(rows.map((r) => r.authorId))]);
+    const nameOf = new Map(people.map((u) => [u.id, u.name]));
+    const avg = rows.length ? Math.round((rows.reduce((s, r) => s + r.rating, 0) / rows.length) * 10) / 10 : null;
+    res.json({
+      average: avg,
+      count: rows.length,
+      reviews: rows
+        .map((r) => ({
+          id: r.id,
+          rating: r.rating,
+          text: r.text,
+          at: r.at,
+          // First name only, for privacy.
+          author: (nameOf.get(r.authorId) || 'Former student').split(' ')[0],
+          mine: r.authorId === req.user.id,
+        }))
+        .sort((a, b) => b.at.localeCompare(a.at)),
+    });
   });
 
   // ---------- Chat ----------
@@ -357,6 +502,12 @@ export function buildApp({ onMessage = () => {}, mailer = createMailer() } = {})
   // ---------- Premium (PromptPay slip check) ----------
   addPaymentRoutes(app, { auth, requireRole, isAdmin });
 
+  // ---------- Growth and insights ----------
+  addReferralRoutes(app, { auth, requireRole });
+  addViewRoutes(app, { auth, requireRole });
+  addStatsRoutes(app, { auth, isAdmin });
+  addPhotoRoutes(app, { auth, requireRole });
+
   // Any unexpected error (for example the database being unreachable).
   app.use((err, _req, res, _next) => {
     if (err.type === 'entity.too.large') {
@@ -371,4 +522,39 @@ export function buildApp({ onMessage = () => {}, mailer = createMailer() } = {})
 
 export function saveMessage(from, to, text) {
   return db.messages.create({ from, to, text: String(text).slice(0, 1000) });
+}
+
+// ---------- Helpers for the new features ----------
+
+const DAY_MS = 24 * 3600 * 1000;
+
+// A room counts as "new" (Premium early access) for 24 hours after it is verified.
+export const isEarlyAccess = (listing) =>
+  Boolean(listing.verifiedAt) && Date.now() - new Date(listing.verifiedAt).getTime() < DAY_MS;
+
+// Reads the advanced match filters from the URL, keeping only valid values.
+export function readMatchFilters(q) {
+  const f = {};
+  if (Number(q.minScore) > 0) f.minScore = Math.min(100, Number(q.minScore));
+  if (['female', 'male', 'other'].includes(q.gender)) f.gender = q.gender;
+  if (['no', 'not_indoors'].includes(q.smoking)) f.smoking = q.smoking;
+  if (['halal', 'vegetarian'].includes(q.food)) f.food = q.food;
+  if (['early', 'late'].includes(q.sleep)) f.sleep = q.sleep;
+  if (q.language && String(q.language).trim()) f.language = String(q.language).trim().toLowerCase().slice(0, 30);
+  if (Number(q.maxBudget) > 0) f.maxBudget = Number(q.maxBudget);
+  return f;
+}
+
+export function passesFilters(p, match, f) {
+  if (!p) return false;
+  if (f.minScore && match.score < f.minScore) return false;
+  if (f.gender && p.gender !== f.gender) return false;
+  if (f.smoking === 'no' && p.smoking !== 'no') return false;
+  if (f.smoking === 'not_indoors' && p.smoking === 'yes') return false;
+  if (f.food && p.food !== f.food) return false;
+  if (f.sleep === 'early' && p.sleep > 2) return false; // 1 = early bird
+  if (f.sleep === 'late' && p.sleep < 4) return false; // 5 = night owl
+  if (f.language && !(p.languages || []).some((l) => l.toLowerCase() === f.language)) return false;
+  if (f.maxBudget && p.budgetMin > f.maxBudget) return false; // they can live within my budget
+  return true;
 }

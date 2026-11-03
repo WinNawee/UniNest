@@ -7,14 +7,21 @@ Course project for AST02.21 E-Business Development and Technology (AIT, August 2
 
 - Student sign-up with a university email check (.edu, .ac.xx, ait.asia)
 - Email confirmation: new accounts get a link by email and can log in only after opening it
+- Forgot password: a reset link by email (works for 1 hour, once), which also logs out other devices
 - Data saved in MongoDB (MongoDB Atlas), so accounts, chats and listings survive a restart
 - Lifestyle questionnaire and a weighted similarity matching score (0 to 100)
 - Match list with a breakdown of why two students fit
 - Real-time in-app chat over WebSockets, with an inbox and unread badges
 - If WebSockets are blocked, chat falls back to normal HTTP and checks for new messages every 3 seconds
 - Verified housing listings with filters (price, type, distance)
-- Landlord page to add rooms, and an admin page to verify them before students can see them
-- Premium (Semester Match Pass, 199 THB): pay by PromptPay QR, upload the transfer slip, an admin approves or rejects it. Free students see their top 3 matches, Premium students see all of them and get a badge
+- Landlord page to add rooms with up to 6 photos, and an admin page to check them (photos included) before students can see them
+- Room photo gallery and a "Message landlord" button that opens a chat with a ready question about the room
+- Premium (Semester Match Pass, 199 THB): pay by PromptPay QR, upload the transfer slip, an admin approves or rejects it
+- Premium features: all matches (free shows the top 3), advanced match filters, see who viewed your profile, 24-hour early access to newly verified rooms, Premium badge
+- Featured Listings for landlords (99 THB for 30 days): the room is shown first in Housing, paid with the same PromptPay slip check
+- Room reviews: confirmed students give 1 to 5 stars, one review per room, shown with first names
+- Invite a friend: when a friend signs up with your link and confirms, both get 7 days of Premium (up to 5 friends)
+- Admin business dashboard: KPIs, student funnel, revenue by stream, sign-ups per day, with demo accounts left out by default
 
 ## Run it
 
@@ -33,9 +40,9 @@ its terminal. That is fine for a quick try. For real use, follow "Settings" belo
 
 Demo accounts (password demo1234, already confirmed):
 
-- Student: mali@ait.ac.th (also aisha, rin, ken, anan @ait.ac.th)
+- Student: mali@ait.ac.th (also aisha, rin, ken, anan, ploy.demo, nina.demo, hana.demo @ait.ac.th)
 - Landlord: owner@baansuan.example
-- Admin: admin@uninest.example (opens the Verify listings page)
+- Admin: admin@uninest.example (opens the Business dashboard, with tabs for Payments and Listings)
 
 Each browser tab keeps its own login, so you can test chat with two accounts in
 two tabs. Closing a tab logs that tab out.
@@ -87,16 +94,46 @@ checks each slip. A payment gateway could automate this after a business is regi
 
 Confirmation links last 24 hours and work once. "Send a new link" can be used once a minute.
 
+## Put it online
+
+See [DEPLOY.md](DEPLOY.md) for step-by-step instructions (Render, Brevo email, MongoDB Atlas).
+In short, Render runs `npm run build` (installs everything and builds the web pages)
+and `npm start` (one server that gives the API, live chat and the web pages).
+
+## Live site safety
+
+The demo password is public on GitHub, so the live site (with `NODE_ENV=production`) works differently:
+
+- The server does not start without `JWT_SECRET` (32+ characters) and `ADMIN_PASSWORD` (10+ characters).
+- `admin@uninest.example` logs in with `ADMIN_PASSWORD`, not `demo1234`.
+- Demo students and the demo landlord cannot log in and do not appear in matches.
+- Demo rooms show a "Sample listing" badge and have no "Message landlord" button.
+
+On a laptop (without `NODE_ENV=production`) all demo accounts work as before.
+For a live demo on presentation day, set `DEMO_ACCOUNTS=on` and restart.
+
 ## Tests
 
     cd server
     npm test
 
-38 tests cover the matching algorithm, the REST API, email confirmation, Premium payments and live chat.
+54 tests cover the matching algorithm, the REST API, email confirmation, password reset, payments, Premium features, referrals, the dashboard, room photos, live-site safety and live chat.
 They use in-memory data by default. To run the same tests against Atlas, set
 `MONGODB_TEST_URI` in `server/.env` to a database whose name contains "test",
 for example `.../uninest_test`. The tests empty that database first and refuse
 to touch a database without "test" in its name.
+
+## E-business concepts in the app
+
+| Concept | Where it shows in UniNest |
+|---|---|
+| Two-sided platform | Students and landlords, each with their own pages |
+| Revenue model | Premium (students) and Featured Listings (landlords) |
+| Freemium | Free top 3 matches and view counts, Premium unlocks the rest |
+| Trust and reputation | Email confirmation, verified listings, reviews, private chat |
+| Growth (viral marketing) | Invite a friend, both get Premium days |
+| E-metrics | Admin dashboard: funnel, conversion rate, revenue by stream |
+| Online payment | PromptPay QR with slip check |
 
 ## How matching works
 
@@ -113,11 +150,15 @@ university removes a candidate completely. The code is in `server/src/matching.j
     server/src/db/mongo.js   MongoDB models and queries
     server/src/db/memory.js  in-memory version with the same functions (tests, quick demos)
     server/src/mailer.js     confirmation emails
-    server/src/payments.js   Premium plan, PromptPay QR, slip upload and admin review
+    server/src/payments.js   Premium and Featured Listing plans, PromptPay QR, slip upload and admin review
+    server/src/referrals.js  invite codes and rewards
+    server/src/views.js      who viewed my profile
+    server/src/stats.js      admin dashboard numbers
+    server/src/photos.js     room photos (upload, delete, show)
     server/src/seed.js       demo accounts and listings
     client/src/pages/        web pages
 
 ## Next steps
 
 - Student ID photo upload
-- Deploy online with HTTPS (set APP_URL, JWT_SECRET and NODE_ENV=production)
+- Check room photos again when a landlord adds them after verification

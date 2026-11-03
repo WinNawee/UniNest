@@ -1,11 +1,19 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { api, setToken } from '../api'
-import { HeartHandshake, MessageCircle, ShieldCheck } from 'lucide-react'
+import { Gift, HeartHandshake, MessageCircle, ShieldCheck } from 'lucide-react'
 import { Button, Card, ErrorText, Field, Logo, inputClass } from '../components/ui'
 import CheckEmail from '../components/CheckEmail'
 
 export default function AuthPage({ onDone }) {
-  const [mode, setMode] = useState('login')
+  // A friend's invite link looks like /?ref=AB12CD
+  const [params] = useSearchParams()
+  const ref = (params.get('ref') || '').toUpperCase()
+  const [invite, setInvite] = useState(null) // { name, rewardDays } when the code is valid
+  const [mode, setMode] = useState(ref ? 'register' : 'login')
+  useEffect(() => {
+    if (ref) api(`/referral/${ref}`).then(setInvite).catch(() => setInvite(null))
+  }, [ref])
   const [role, setRole] = useState('student')
   const [form, setForm] = useState({ name: '', email: '', password: '' })
   const [error, setError] = useState('')
@@ -20,7 +28,7 @@ export default function AuthPage({ onDone }) {
     setBusy(true)
     try {
       if (mode === 'register') {
-        const data = await api('/auth/register', { method: 'POST', body: { ...form, role } })
+        const data = await api('/auth/register', { method: 'POST', body: { ...form, role, ...(invite ? { ref } : {}) } })
         setPending(data)
       } else {
         const { token } = await api('/auth/login', { method: 'POST', body: { email: form.email, password: form.password } })
@@ -68,6 +76,12 @@ export default function AuthPage({ onDone }) {
         ) : (
         <>
         <h2 className="hidden lg:block text-2xl font-bold mb-4">Welcome</h2>
+        {invite && (
+          <div className="flex items-center gap-3 bg-sun/20 border border-sun rounded-2xl p-3 mb-4 text-sm">
+            <Gift size={22} className="shrink-0 text-amber-700" />
+            <p><b>{invite.name} invited you to UniNest.</b> Sign up as a student and confirm your email to get {invite.rewardDays} days of Premium free.</p>
+          </div>
+        )}
         <Card>
           <div className="flex gap-2 mb-5">
             {['login', 'register'].map((m) => (
@@ -105,10 +119,16 @@ export default function AuthPage({ onDone }) {
             </Field>
             <ErrorText>{error}</ErrorText>
             <Button disabled={busy} className="w-full">{mode === 'login' ? 'Log in' : 'Create account'}</Button>
+            {mode === 'login' && (
+              <p className="text-center mt-3"><Link to="/forgot-password" className="text-sm underline">Forgot password?</Link></p>
+            )}
           </form>
-          <p className="text-xs text-ink/60 mt-4">
-            Demo student: mali@ait.ac.th, landlord: owner@baansuan.example, admin: admin@uninest.example. Password for all: demo1234
-          </p>
+          {/* Demo logins are shown only when running on a laptop (npm run dev), not on the live site. */}
+          {import.meta.env.DEV && (
+            <p className="text-xs text-ink/60 mt-4">
+              Demo student: mali@ait.ac.th, landlord: owner@baansuan.example, admin: admin@uninest.example. Password for all: demo1234
+            </p>
+          )}
         </Card>
         </>
         )}

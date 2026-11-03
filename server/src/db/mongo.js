@@ -13,7 +13,14 @@ const User = mongoose.model('User', new Schema({
   verifyTokenHash: { type: String, index: true },
   verifyTokenExpires: Date,
   verifyTokenSentAt: Date,
+  resetTokenHash: { type: String, index: true }, // "forgot password" link
+  resetTokenExpires: Date,
+  resetTokenSentAt: Date,
+  sessionVersion: { type: Number, default: 0 }, // raised on password reset, which logs out old logins
   premiumUntil: Date, // Semester Match Pass end date
+  referralCode: { type: String, index: true },
+  referredBy: { type: String, index: true },
+  referralRewarded: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now },
 }));
 
@@ -46,6 +53,9 @@ const Listing = mongoose.model('Listing', new Schema({
   amenities: [String],
   campus: String,
   verified: { type: Boolean, default: false },
+  verifiedAt: Date, // used for Premium early access
+  featuredUntil: Date, // paid Featured Listing end date
+  photoIds: [String], // ids in the Photo collection, first one is the cover
   createdAt: { type: Date, default: Date.now },
 }));
 
@@ -61,6 +71,8 @@ const Message = mongoose.model('Message', new Schema({
 // compressed image (data URL), so no separate file storage is needed.
 const Payment = mongoose.model('Payment', new Schema({
   userId: { type: String, required: true, index: true },
+  type: { type: String, enum: ['premium', 'featured'], default: 'premium' },
+  listingId: String, // for Featured Listing payments
   plan: String,
   amount: Number,
   slip: String,
@@ -68,6 +80,21 @@ const Payment = mongoose.model('Payment', new Schema({
   rejectReason: String,
   reviewedBy: String,
   reviewedAt: Date,
+  createdAt: { type: Date, default: Date.now },
+}));
+
+// One row per (viewer, viewed) pair, with the latest time they viewed.
+const View = mongoose.model('View', new Schema({
+  viewerId: { type: String, required: true },
+  viewedId: { type: String, required: true, index: true },
+  at: { type: Date, default: Date.now },
+}).index({ viewerId: 1, viewedId: 1 }, { unique: true }));
+
+// Room photo as a compressed JPEG data URL. Stored apart from the listing,
+// so loading the room list does not download every photo.
+const Photo = mongoose.model('Photo', new Schema({
+  listingId: { type: String, required: true, index: true },
+  data: { type: String, required: true },
   createdAt: { type: Date, default: Date.now },
 }));
 
@@ -102,7 +129,7 @@ export const mongoStore = {
   async connect(uri, { defaultDbName = 'uninest' } = {}) {
     const dbName = dbNameFromUri(uri) || defaultDbName;
     await mongoose.connect(uri, { dbName, serverSelectionTimeoutMS: 10000 });
-    await Promise.all([User, Profile, Listing, Message, Review, Payment].map((m) => m.init()));
+    await Promise.all([User, Profile, Listing, Message, Review, Payment, View, Photo].map((m) => m.init()));
   },
 
   async disconnect() {
@@ -118,7 +145,7 @@ export const mongoStore = {
   async reset() {
     const dbName = mongoose.connection.name;
     if (!dbName.includes('test')) throw new Error(`Refusing to reset database "${dbName}"`);
-    await Promise.all([User, Profile, Listing, Message, Review, Payment].map((m) => m.deleteMany({})));
+    await Promise.all([User, Profile, Listing, Message, Review, Payment, View, Photo].map((m) => m.deleteMany({})));
   },
 
   users: {
@@ -140,6 +167,14 @@ export const mongoStore = {
     },
     async findByVerifyTokenHash(hash) {
       return clean(await User.findOne({ verifyTokenHash: hash }).lean());
+    },
+    async all() {
+      const rows = await User.find().lean();
+      return rows.map(clean);
+    },
+    async find(filter = {}) {
+      const rows = await User.find(filter).lean();
+      return rows.map(clean);
     },
     async update(id, fields) {
       if (!validId(id)) return null;
@@ -199,6 +234,19 @@ export const mongoStore = {
     async markRead(from, to) {
       await Message.updateMany({ from, to, read: false }, { read: true });
     },
+    async senders() {
+      return Message.distinct('from');
+    },
+  },
+
+  views: {
+    async record(viewerId, viewedId) {
+      await View.updateOne({ viewerId, viewedId }, { at: new Date() }, { upsert: true });
+    },
+    async forViewed(viewedId) {
+      const rows = await View.find({ viewedId }).sort({ at: -1 }).lean();
+      return rows.map(clean);
+    },
   },
 
   payments: {
@@ -218,6 +266,18 @@ export const mongoStore = {
     },
   },
 
+  photos: {
+    async create(data) {
+      return clean(await Photo.create(data));
+    },
+    async get(id) {
+      return validId(id) ? clean(await Photo.findById(id).lean()) : null;
+    },
+    async delete(id) {
+      if (validId(id)) await Photo.findByIdAndDelete(id);
+    },
+  },
+
   reviews: {
     async create(data) {
       return clean(await Review.create(data));
@@ -225,6 +285,14 @@ export const mongoStore = {
     async forListing(listingId) {
       const rows = await Review.find({ listingId }).sort({ at: 1 }).lean();
       return rows.map(clean);
+    },
+    async find(filter = {}) {
+      const rows = await Review.find(filter).lean();
+      return rows.map(clean);
+    },
+    async update(id, fields) {
+      if (!validId(id)) return null;
+      return clean(await Review.findByIdAndUpdate(id, fields, after).lean());
     },
   },
 };

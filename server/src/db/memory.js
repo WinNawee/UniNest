@@ -10,6 +10,8 @@ let listings = new Map();
 let messages = [];
 let reviews = [];
 let payments = new Map();
+let views = []; // { viewerId, viewedId, at }, one row per pair, newest time kept
+let photos = new Map(); // room photos, kept apart from listings so the room list stays small
 
 const now = () => new Date().toISOString();
 const copy = (x) => (x ? structuredClone(x) : null);
@@ -28,6 +30,8 @@ export const memoryStore = {
     messages = [];
     reviews = [];
     payments = new Map();
+    views = [];
+    photos = new Map();
   },
 
   users: {
@@ -48,6 +52,15 @@ export const memoryStore = {
     },
     async findByIds(ids) {
       return ids.map((id) => users.get(id)).filter(Boolean).map(copy);
+    },
+    async all() {
+      return [...users.values()].map(copy);
+    },
+    // filter: exact values, for example { referredBy: id } or { referralCode: 'AB12CD' }
+    async find(filter = {}) {
+      return [...users.values()]
+        .filter((u) => Object.entries(filter).every(([k, v]) => u[k] === v))
+        .map(copy);
     },
     async findByVerifyTokenHash(hash) {
       return copy([...users.values()].find((u) => u.verifyTokenHash === hash));
@@ -115,6 +128,26 @@ export const memoryStore = {
     async markRead(from, to) {
       for (const m of messages) if (m.from === from && m.to === to) m.read = true;
     },
+    // Ids of everyone who has sent at least one message.
+    async senders() {
+      return [...new Set(messages.map((m) => m.from))];
+    },
+  },
+
+  views: {
+    // Remember that viewer opened viewed's profile (keeps only the latest time).
+    async record(viewerId, viewedId) {
+      const row = views.find((v) => v.viewerId === viewerId && v.viewedId === viewedId);
+      if (row) row.at = now();
+      else views.push({ viewerId, viewedId, at: now() });
+    },
+    // Who viewed this person, newest first.
+    async forViewed(viewedId) {
+      return views
+        .filter((v) => v.viewedId === viewedId)
+        .sort((a, b) => b.at.localeCompare(a.at))
+        .map(copy);
+    },
   },
 
   payments: {
@@ -141,6 +174,20 @@ export const memoryStore = {
     },
   },
 
+  photos: {
+    async create({ listingId, data }) {
+      const photo = { id: randomUUID(), listingId, data, createdAt: now() };
+      photos.set(photo.id, photo);
+      return copy(photo);
+    },
+    async get(id) {
+      return copy(photos.get(id));
+    },
+    async delete(id) {
+      photos.delete(id);
+    },
+  },
+
   reviews: {
     async create(data) {
       const r = { id: randomUUID(), at: now(), ...data };
@@ -149,6 +196,17 @@ export const memoryStore = {
     },
     async forListing(listingId) {
       return reviews.filter((r) => r.listingId === listingId).map(copy);
+    },
+    async find(filter = {}) {
+      return reviews
+        .filter((r) => Object.entries(filter).every(([k, v]) => r[k] === v))
+        .map(copy);
+    },
+    async update(id, fields) {
+      const r = reviews.find((x) => x.id === id);
+      if (!r) return null;
+      Object.assign(r, fields);
+      return copy(r);
     },
   },
 };

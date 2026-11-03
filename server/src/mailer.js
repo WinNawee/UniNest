@@ -1,4 +1,4 @@
-// Sends the "confirm your email" message.
+// Sends the "confirm your email" and "reset your password" messages.
 // With SMTP settings in .env (for example a Gmail app password) it sends a real
 // email. Without them it prints the link in the server terminal instead,
 // so the app still works on a laptop with no email setup.
@@ -34,7 +34,46 @@ export function createMailer(env = process.env) {
       });
       return { delivered: true };
     },
+
+    async sendPasswordReset({ to, name, link }) {
+      if (!transport) {
+        console.log(`\n[email not set up] Password reset link for ${to}:\n${link}\n`);
+        return { delivered: false };
+      }
+      await transport.sendMail({
+        from: env.MAIL_FROM || env.SMTP_USER,
+        to,
+        subject: 'Reset your UniNest password',
+        text: resetText(name, link),
+        html: resetHtml(name, link),
+      });
+      return { delivered: true };
+    },
   };
+}
+
+export function resetText(name, link) {
+  return [
+    `Hi ${name},`,
+    '',
+    'Someone asked to reset the password of your UniNest account. To choose a new password, open this link:',
+    link,
+    '',
+    'The link works for 1 hour. If you did not ask for this, you can ignore this email and your password stays the same.',
+  ].join('\n');
+}
+
+export function resetHtml(name, link) {
+  const safeLink = escapeHtml(link);
+  return `
+  <div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;color:#25282b">
+    <h2 style="color:#2f9068">Reset your password</h2>
+    <p>Hi ${escapeHtml(name)},</p>
+    <p>Someone asked to reset the password of your UniNest account.</p>
+    <p><a href="${safeLink}" style="display:inline-block;background:#2f9068;color:#fff;padding:12px 20px;border-radius:10px;text-decoration:none;font-weight:bold">Choose a new password</a></p>
+    <p style="font-size:13px;color:#666">Or copy this link: ${safeLink}</p>
+    <p style="font-size:13px;color:#666">The link works for 1 hour. If you did not ask for this, you can ignore this email.</p>
+  </div>`;
 }
 
 export function verificationText(name, link) {
